@@ -1,6 +1,15 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from .consts import END_KEY, INSTRUCTION_KEY, RESPONSE_KEY_NL, DEFAULT_INPUT_MODEL
+from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizer
+from .consts import (
+    END_KEY,
+    INSTRUCTION_KEY,
+    RESPONSE_KEY_NL,
+    DEFAULT_INPUT_MODEL,
+)
 from typing import Union, Tuple, Any, Dict, List
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def load_tokenizer(
     pretrained_model_name_or_path: str = DEFAULT_INPUT_MODEL,
@@ -17,14 +26,13 @@ def load_tokenizer(
 def load_model(
     pretrained_model_name_or_path: str = DEFAULT_INPUT_MODEL,
     *,
-    gradient_checkpointing=gradient_checkpointing: bool = False
+    gradient_checkpointing: bool = False,
 ) -> AutoModelForCausalLM:
-
     logger.info(f"Loading model for {pretrained_model_name_or_path}")
     model = AutoModelForCausalLM.from_pretrained(
         pretrained_model_name_or_path,
         trust_remote_code=True,
-        use_cache=False if gradient_checkpointing else True
+        use_cache=False if gradient_checkpointing else True,
     )
 
     return model
@@ -34,11 +42,12 @@ def get_model_tokenizer(
     pretrained_model_name_or_path: str = DEFAULT_INPUT_MODEL,
     *,
     gradient_checkpointing: bool = False,
-) -> Tuple[AutoModelForCausalLM]:
+) -> Tuple[AutoModelForCausalLM, PreTrainedTokenizer]:
     tokenizer = load_tokenizer(pretrained_model_name_or_path)
     model = load_model(
         pretrained_model_name_or_path, gradient_checkpointing=gradient_checkpointing
     )
 
-    return model, tokenizer
+    model.resize_token_embeddings(len(tokenizer))
 
+    return model, tokenizer

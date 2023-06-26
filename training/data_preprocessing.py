@@ -1,13 +1,18 @@
+from typing import List, Any, Dict, Tuple, Union
 from .consts import (
     DEFAULT_TRAINING_DATASET,
     PROMPT_WITH_INPUT_FORMAT,
     PROMPT_NO_INPUT_FORMAT,
     RESPONSE_KEY_NL,
+    DEFAULT_SEED,
 )
-from functool import partial
+from functools import partial
 import numpy as np
 from datasets import Dataset, load_dataset
-from transformers import DataCollatorForLanguageModeling
+from transformers import AutoTokenizer, DataCollatorForLanguageModeling
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
@@ -47,7 +52,7 @@ def load_training_dataset(path_or_dataset: str = DEFAULT_TRAINING_DATASET) -> Da
     logger.info(f"Loading dataset from {path_or_dataset}")
     # only the training dataset from the huggingface
     dataset = load_dataset(path_or_dataset)["train"]
-    logger.info(f"Found %d rows", dataset_num_rows)
+    logger.info(f"Found %d rows", dataset.num_rows)
 
     # bind the dataset to text
     def _add_text(rec):
@@ -81,7 +86,7 @@ def load_training_dataset(path_or_dataset: str = DEFAULT_TRAINING_DATASET) -> Da
 def preprocess_batch(
     batch: Dict[str, int], tokenizer: AutoTokenizer, max_length: int
 ) -> dict:
-    return tokenizer(batch["text"], max_length=max_length, trucation=True)
+    return tokenizer(batch["text"], max_length=max_length, truncation=True)
 
 
 def preprocess_dataset(

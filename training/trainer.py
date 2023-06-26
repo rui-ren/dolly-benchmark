@@ -1,6 +1,5 @@
 # Dolly model training with ORT and Lora
 
-
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
@@ -20,7 +19,7 @@ from optimum.onnxruntime import ORTTrainer, ORTTrainingArguments
 
 import argparse
 
-from .model_selector import load_tokenizer, load_model
+from .model_selector import load_tokenizer, load_model, get_model_tokenizer
 from .data_preprocessing import preprocess_dataset, DataCollatorForCompletionOnlyLM
 
 from .consts import (
@@ -39,6 +38,124 @@ logger = logging.getLogger(__name__)
 ROOT_PATH = Path(__file__).parent.parent
 
 
+# define str2bool function to handle different input scenario
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("yes", "true", "t", "y", "1"):
+        return True
+    if v.lower() in ("no", "false", "f", "n", "0"):
+        return False
+    else:
+        RuntimeError("Boolean value expected")
+
+
+parser = argparse.ArgumentParser(description="Finetune Dolly Model")
+
+parser.add_argument("--input-model", type=str, help="Input model to fine tune")
+
+parser.add_argument(
+    "--local-output-dir", type=str, help="directly local path", required=True
+)
+
+# This optional, no need the databricks file system
+parser.add_argument(
+    "--dbfs-output-dir", type=str, help="sync data to this path on DBFS"
+)
+
+parser.add_argument(
+    "--epochs", type=int, default=3, help="Number of epochs to train for."
+)
+
+parser.add_argument("--apply-ort", type=str2bool, default=False, help="Use the ort")
+
+parser.add_argument("--apply-lora", type=str2bool, default=False, help="Use Lora")
+
+parser.add_argument(
+    "--per-device-train-batch-size",
+    type=int,
+    default=8,
+    help="Batch size to use for training.",
+)
+
+parser.add_argument(
+    "--per-device-eval-batch-size",
+    type=int,
+    default=8,
+    help="Batch size to use for evaluation.",
+)
+
+parser.add_argument(
+    "--test-size",
+    type=int,
+    default=1000,
+    help="Number of test records for evaluation, or ratio of test records",
+)
+
+parser.add_argument(
+    "--warmup-steps",
+    type=int,
+    default=None,
+    help="Number of steps to warm up to learning rate",
+)
+
+parser.add_argument("--logging-steps", type=int, default=10, help="how often to log")
+
+parser.add_argument(
+    "--eval-steps",
+    type=int,
+    default=50,
+    help="How often to run evaluation on test records",
+)
+
+parser.add_argument(
+    "--save-steps", type=int, default=400, help="How to checkpoint the model"
+)
+
+parser.add_argument(
+    "--save-total-limit",
+    type=int,
+    default=10,
+    help="Maximum number of checkpoints to keep on disk",
+)
+
+parser.add_argument("--lr", type=float, default=1e-5, help="Seed to use for training.")
+
+parser.add_argument(
+    "--seed", type=int, default=DEFAULT_SEED, help="Seed to use for training."
+)
+
+parser.add_argument(
+    "--deepspeed", type=str, default=None, help="Path to deepspeed config file"
+)
+
+parser.add_argument(
+    "--training-dataset",
+    type=str,
+    default=DEFAULT_TRAINING_DATASET,
+    help="Path to dataset for training",
+)
+
+parser.add_argument(
+    "--gradient-checkpointing",
+    type=str,
+    default=True,
+    help="Use gradient checkpointing?",
+)
+
+parser.add_argument(
+    "--local_rank",
+    type=str,
+    default=True,
+    help="Provided by deepspeed to identity which instance this process is when performing multi-GPU training",
+)
+
+
+parser.add_argument(
+    "--bf16", type=bool, default=None, help="Whether to use bf16 (Preferred on A100's)"
+)
+
+
 def train(
     *,
     input_model: str,
@@ -49,6 +166,8 @@ def train(
     per_device_eval_batch_size: int,
     lr: float,
     seed: int,
+    apply_ort: bool,
+    apply_lora: bool,
     deepspeed: str,
     gradient_checkpointing: bool,
     local_rank: str,
@@ -100,7 +219,7 @@ def train(
 
     processed_dataset = preprocess_dataset(
         tokenizer=tokenizer,
-        max_lenth=max_length,
+        max_length=max_length,
         seed=seed,
         training_dataset=training_dataset,
     )
@@ -145,19 +264,19 @@ def train(
         warmup_steps=warmup_steps,
     )
 
+    logging.info(f"the training parameters for Dolly {training_parameters}")
+
     # Apply ort model
     if apply_ort == True:
         training_args = ORTTrainingArguments(**training_parameters)
-        trainer = ORTTrainer
 
     else:
         # use the huggingface trainer
-        trainig_args = TrainingArguments(**training_parameters)
-        trainer = Trainer
+        training_args = TrainingArguments(**training_parameters)
 
     logging.info("Instantiating Trainer")
 
-    trainer_karg = dict(
+    trainer_args = dict(
         model=model,
         tokenizer=tokenizer,
         args=training_args,
@@ -166,15 +285,52 @@ def train(
         data_collator=data_collator,
     )
 
-    trainer(**trainer_args)
+    logging.info(f"The trainer arguments {trainer_args}")
+
+    if apply_ort == True:
+        trainer = ORTTrainer(**trainer_args)
+    else:
+        trainer = Trainer(**trainer_args)
     logging.info("Training")
 
     trainer.train()
 
-    logger.info(f"Save Model to {local_output}")
+    logger.info(f"Save Model to {local_output_dir}")
     trainer.save_model(output_dir=local_output_dir)
 
     logger.info("Done.")
+
+
+def main(raw_args=None):
+    args = parser.parse_args(raw_args)
+
+    print(args.__dict__)
+
+    training_args_dict = {
+        "input_model": args.input_model,
+        "local_output_dir": args.local_output_dir,
+        "dbfs_output_dir": args.dbfs_output_dir,
+        "apply_ort": args.apply_ort,
+        "apply_lora": args.apply_lora,
+        "epochs": args.epochs,
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "per_device_eval_batch_size": args.per_device_eval_batch_size,
+        "lr": args.lr,
+        "seed": args.seed,
+        "deepspeed": args.deepspeed,
+        "gradient_checkpointing": args.gradient_checkpointing,
+        "local_rank": args.local_rank,
+        "bf16": args.bf16,
+        "logging_steps": args.logging_steps,
+        "save_steps": args.save_steps,
+        "eval_steps": args.eval_steps,
+        "test_size": args.test_size,
+        "save_total_limit": args.save_total_limit,
+        "warmup_steps": args.warmup_steps,
+        "training_dataset": args.training_dataset,
+    }
+
+    train(**training_args_dict)
 
 
 if __name__ == "__main__":

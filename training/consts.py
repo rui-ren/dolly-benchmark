@@ -1,3 +1,12 @@
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    level=logging.INFO,
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+
 DEFAULT_INPUT_MODEL = "EleutherAI/pythia-6.9b"
 
 SUGGESTED_INPUT_MODELS = [
@@ -7,7 +16,7 @@ SUGGESTED_INPUT_MODELS = [
     "EleutherAI/gpt-j-6B",
     "databricks/dolly-v2-3b",
     "databricks/dolly-v2-7b",
-    "databricks/dolly-v2-12b"
+    "databricks/dolly-v2-12b",
 ]
 
 
@@ -38,10 +47,10 @@ PROMPT_NO_INPUT_FORMAT = """{intro}
 {end_key}""".format(
     intro=INTRO_BLURB,
     instruction_key=INSTRUCTION_KEY,
-    instruction={instruction},
+    instruction="{instruction}",
     response_key=RESPONSE_KEY,
-    response={response},
-    end_key=END_KEY
+    response="{response}",
+    end_key=END_KEY,
 )
 
 
@@ -64,12 +73,11 @@ PROMPT_WITH_INPUT_FORMAT = """{intro}
     instruction_key=INSTRUCTION_KEY,
     instruction="{instruction}",
     input_key=INPUT_KEY,
-    input={input},
+    input="{input}",
     response_key=RESPONSE_KEY,
-    response={response},
-    end_key=END_KEY
+    response="{response}",
+    end_key=END_KEY,
 )
-
 
 
 # This is the prompt that is used to generate response using already trained model. It ends with the response key.
