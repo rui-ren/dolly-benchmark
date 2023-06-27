@@ -238,62 +238,89 @@ def train(
     if not dbfs_output_dir:
         logger.warn("Will not save to DBFS")
 
-    training_parameters = dict(
-        output_dir=local_output_dir,
-        per_device_train_batch_size=per_device_train_batch_size,
-        per_device_eval_batch_size=per_device_eval_batch_size,
-        fp16=fp16,
-        bf16=bf16,
-        learning_rate=lr,
-        num_train_epochs=epochs,
-        deepspeed=deepspeed,
-        gradient_checkpointing=gradient_checkpointing,
-        logging_dir=f"{local_output_dir}/runs",
-        logging_strategy="steps",
-        logging_steps=logging_steps,
-        evaluation_strategy="steps",
-        eval_steps=eval_steps,
-        save_strategy="steps",
-        save_steps=save_steps,
-        save_total_limit=save_total_limit,
-        load_best_model_at_end=False,
-        report_to="tensorboard",
-        disable_tqdm=True,
-        remove_unused_columns=False,
-        local_rank=local_rank,
-        warmup_steps=warmup_steps,
-    )
-
-    logging.info(f"the training parameters for Dolly {training_parameters}")
+    if deepspeed and apply_ort:
+        # Leverage deepspeed and ort
+        deepspeed_config_file = deepspeed
+        training_args_dict = dict(
+            output_dir=local_output_dir,
+            do_train=True,
+            do_eval=True,
+            per_device_train_batch_size=per_device_train_batch_size,
+            per_device_eval_batch_size=per_device_eval_batch_size,
+            eval_accumulation_steps=1,
+            save_strategy="steps",
+            save_steps=save_steps,
+            fp16=fp16,
+            deepspeed=deepspeed_config_file,
+            learning_rate=lr,
+        )
+    else:
+        training_args_dict = dict(
+            output_dir=local_output_dir,
+            per_device_train_batch_size=per_device_train_batch_size,
+            per_device_eval_batch_size=per_device_eval_batch_size,
+            fp16=fp16,
+            bf16=bf16,
+            learning_rate=lr,
+            num_train_epochs=epochs,
+            deepspeed=deepspeed,
+            gradient_checkpointing=gradient_checkpointing,
+            logging_dir=f"{local_output_dir}/runs",
+            logging_strategy="steps",
+            logging_steps=logging_steps,
+            evaluation_strategy="steps",
+            eval_steps=eval_steps,
+            save_strategy="steps",
+            save_steps=save_steps,
+            save_total_limit=save_total_limit,
+            load_best_model_at_end=False,
+            report_to="tensorboard",
+            disable_tqdm=True,
+            remove_unused_columns=False,
+            local_rank=local_rank,
+            warmup_steps=warmup_steps,
+        )
 
     # Apply ort model
     if apply_ort == True:
-        training_args = ORTTrainingArguments(**training_parameters)
+        # training_args = ORTTrainingArguments(**training_args_dict)
+        training_args = ORTTrainingArguments(**training_args_dict)
+        trainer = ORTTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            args=training_args,
+            train_dataset=split_dataset["train"],
+            eval_dataset=split_dataset["test"],
+            data_collator=data_collator,
+            feature="text-generation",
+        )
 
     else:
         # use the huggingface trainer
-        training_args = TrainingArguments(**training_parameters)
+        training_args = TrainingArguments(**training_args_dict)
+        trainer = Trainer(
+            model=model,
+            tokenizer=tokenizer,
+            args=training_args,
+            train_dataset=split_dataset["train"],
+            eval_dataset=split_dataset["test"],
+            data_collator=data_collator,
+        )
 
     logging.info("Instantiating Trainer")
 
-    trainer_args = dict(
-        model=model,
-        tokenizer=tokenizer,
-        args=training_args,
-        train_dataset=split_dataset["train"],
-        eval_dataset=split_dataset["test"],
-        data_collator=data_collator,
-    )
+    # train
+    train_result = trainer.train()
 
-    logging.info(f"The trainer arguments {trainer_args}")
+    train_metrics = train_result.metrics
+    train_metrics["train_samples"] = len(split_dataset["train"])
+    trainer.log_metrics("train", train_metrics)
 
-    if apply_ort == True:
-        trainer = ORTTrainer(**trainer_args)
-    else:
-        trainer = Trainer(**trainer_args)
-    logging.info("Training")
-
-    trainer.train()
+    eval_metrics = trainer.evaluate()
+    eval_metrics["eval_samples"] = len(split_dataset["test"])
+    perplexity = math.exp(eval_metrics["eval_loss"])
+    eval_metrics["perplexity"] = perplexity
+    trainer.log_metrics("eval", eval_metrics)
 
     logger.info(f"Save Model to {local_output_dir}")
     trainer.save_model(output_dir=local_output_dir)

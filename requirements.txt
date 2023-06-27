@@ -1,8 +1,10 @@
 accelerate>=0.16.0,<1
 datasets>=2.10.0,<3
-transformers[torch]>=4.28.1,<5
+transformers[torch]==4.29.1
 langchain>=0.0.139
-optimum==1.8.8
+optimum==1.8.5
 peft==0.3.0
 tensorboard
+evaluate
+scikit-learn
 
